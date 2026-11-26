@@ -1,0 +1,10 @@
+# Python dependencies for whisper_server.py (voice transcription).
+# Install into a virtual environment:
+#   python -m venv .venv
+#   .venv\Scripts\activate        (Windows)   /   source .venv/bin/activate  (macOS/Linux)
+#   pip install -r requirements.txt
+#
+# This pulls in everything faster-whisper needs (ctranslate2, tokenizers, av, ...).
+# Do not add "--no-deps" to a requirement line: pip rejects the whole file
+# ("Invalid requirement"), so the Whisper server could never be installed from it.
+faster-whisper==1.2.1

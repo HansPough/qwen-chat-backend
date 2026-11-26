@@ -1,4 +1,16 @@
+# Secrets and local configuration (never commit these)
 .env
+
+# Installed dependencies: restore with "npm install" and "pip install -r requirements.txt"
 node_modules/
+.venv/
+venv/
+
+# Python
 __pycache__/
+*.pyc
+
+# Logs and OS noise
 *.log
+.DS_Store
+Thumbs.db

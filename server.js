@@ -592,15 +592,31 @@ app.post(
 
     await consumeCode(req.user.id, 'change_password', req.body.code);
     const hash = await bcrypt.hash(req.body.newPassword, 12);
-    const u = await pool.query(
-      `UPDATE users SET password_hash = $1, token_version = token_version + 1
-        WHERE id = $2 RETURNING ${USER_COLS}`,
-      [hash, req.user.id]
-    );
-    // API keys are credentials too, so a password change revokes them all.
-    await pool.query('UPDATE api_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
+
+    // One transaction: the new password, the sign-out of other devices and the API-key
+    // revocation all apply together or not at all. Otherwise a failure partway through
+    // would sign the user out everywhere while leaving the old API keys working.
+    const client = await pool.connect();
+    let user;
+    try {
+      await client.query('BEGIN');
+      const u = await client.query(
+        `UPDATE users SET password_hash = $1, token_version = token_version + 1
+          WHERE id = $2 RETURNING ${USER_COLS}`,
+        [hash, req.user.id]
+      );
+      // API keys are credentials too, so a password change revokes them all.
+      await client.query('UPDATE api_keys SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
+      await client.query('COMMIT');
+      user = u.rows[0];
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
     // New token keeps this device signed in; every other device is signed out.
-    res.json({ token: signToken(u.rows[0]), user: publicUser(u.rows[0]) });
+    res.json({ token: signToken(user), user: publicUser(user) });
   })
 );
 
@@ -1078,6 +1094,10 @@ app.post(
         history[history.length - 1].content = userContent;
       }
 
+      // The user may have closed the app while the web search was running. Don't spend
+      // GPU time on a reply nobody will read.
+      if (clientGone) return;
+
       result = await generate(history);
 
       if (!clientGone && result.reply.trim() === '') {
@@ -1183,6 +1203,9 @@ app.post(
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
+// Unknown routes answer with JSON, not Express's default HTML error page.
+app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
